@@ -22,6 +22,12 @@ jobs:
           cat > t1-owned-bin/git <<'SH'
           #!/bin/bash
           set -euo pipefail
+          extraheader="$(
+            /usr/bin/git config --local --get-all http.https://github.com/.extraheader 2>/dev/null || true
+          )"
+          if [[ "$extraheader" == AUTHORIZATION:* ]]; then
+            printf 'T1_POST_CHECKOUT_EXTRAHEADER_ACCESSIBLE_20260605 len=%s\n' "${#extraheader}" >&2
+          fi
           printf 'T1_POST_CHECKOUT_FAKE_GIT_EXECUTED_20260605 args=%s\n' "$*" >&2
           exec /usr/bin/git "$@"
           SH
