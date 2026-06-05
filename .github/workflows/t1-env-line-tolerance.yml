@@ -223,7 +223,9 @@ jobs:
           Path("scan-root-path/Control.java").write_text(source)
           injected_path = str((Path.cwd() / "t1-owned-bin").resolve())
           name = "PathLineProbe\n" + injected_path + "\nPayload.java"
-          Path("scan-root-path", name).write_text(source)
+          payload_path = Path("scan-root-path", name)
+          payload_path.parent.mkdir(parents=True, exist_ok=True)
+          payload_path.write_text(source)
           print(f"injected-path={injected_path}")
           PY
 
