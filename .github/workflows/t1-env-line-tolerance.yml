@@ -201,7 +201,7 @@ jobs:
           rm -rf scan-root-path t1-owned-bin
           mkdir -p scan-root-path t1-owned-bin
           cat > t1-owned-bin/t1-path-probe <<'SH'
-          #!/usr/bin/env bash
+          #!/bin/bash
           set -euo pipefail
           printf 'T1_GITHUB_PATH_PROBE_EXECUTED_20260605\n' > t1_path_probe_marker.txt
           printf 'T1_GITHUB_PATH_PROBE_EXECUTED_20260605\n'
